@@ -197,3 +197,181 @@ document.addEventListener('DOMContentLoaded', function() {
         return text.substring(0, maxLength) + '...';
     }
 });
+
+// User profile search functionality
+document.getElementById('usernameSearchButton').addEventListener('click', function() {
+    const username = document.getElementById('usernameSearchInput').value.trim();
+    if (username) {
+        fetchUserProfile(username);
+    }
+});
+
+// Function to fetch user profile
+function fetchUserProfile(username) {
+    const modal = new bootstrap.Modal(document.getElementById('userProfileModal'));
+    document.getElementById('userProfileLoading').style.display = 'block';
+    document.getElementById('userProfileContent').style.display = 'none';
+    document.getElementById('viewProfileOnBlurt').href = `https://blurt.blog/@${username}`;
+    
+    // Show modal immediately
+    modal.show();
+    document.getElementById('userProfileModalTitle').textContent = `@${username}`;
+
+    // Fetch account data
+    fetch('https://api.blurt.blog', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'get_accounts',
+            params: [[username]],
+            id: 1
+        })
+    })
+    .then(response => response.json())
+    .then(accountData => {
+        if (!accountData.result || accountData.result.length === 0) {
+            throw new Error('User not found');
+        }
+        
+        const user = accountData.result[0];
+        return Promise.all([
+            Promise.resolve(user),
+            fetchUserPosts(username),
+            fetchUserFollowersCount(username),
+            fetchUserFollowingCount(username)
+        ]);
+    })
+    .then(([user, posts, followersCount, followingCount]) => {
+        displayUserProfile(user, posts, followersCount, followingCount);
+    })
+    .catch(error => {
+        console.error('Error fetching user profile:', error);
+        document.getElementById('userProfileContent').innerHTML = `
+            <div class="alert alert-danger">
+                Error loading profile: ${error.message || 'User not found'}
+            </div>
+        `;
+        document.getElementById('userProfileLoading').style.display = 'none';
+        document.getElementById('userProfileContent').style.display = 'block';
+    });
+}
+
+// Fetch user's posts
+function fetchUserPosts(username) {
+    return fetch('https://api.blurt.blog', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'get_discussions_by_author_before_date',
+            params: [username, "", "2030-01-01T00:00:00", 5],
+            id: 1
+        })
+    })
+    .then(response => response.json())
+    .then(data => data.result || []);
+}
+
+// Fetch followers count
+function fetchUserFollowersCount(username) {
+    return fetch('https://api.blurt.blog', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'get_follow_count',
+            params: [username],
+            id: 1
+        })
+    })
+    .then(response => response.json())
+    .then(data => data.result ? data.result.follower_count : 0);
+}
+
+// Fetch following count
+function fetchUserFollowingCount(username) {
+    return fetch('https://api.blurt.blog', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            jsonrpc: '2.0',
+            method: 'get_follow_count',
+            params: [username],
+            id: 1
+        })
+    })
+    .then(response => response.json())
+    .then(data => data.result ? data.result.following_count : 0);
+}
+
+// Display user profile
+function displayUserProfile(user, posts, followersCount, followingCount) {
+    const profileHtml = `
+        <div class="row">
+            <div class="col-md-4 text-center">
+                <img src="https://images.blurt.blog/u/${user.name}/avatar" 
+                     alt="${user.name}" class="img-fluid rounded-circle mb-3" 
+                     style="width: 150px; height: 150px; object-fit: cover;"
+                     onerror="this.src='https://via.placeholder.com/150'">
+                <h4>@${user.name}</h4>
+                ${user.json_metadata.profile ? `
+                    <p>${user.json_metadata.profile.about || ''}</p>
+                    ${user.json_metadata.profile.website ? `
+                        <p><a href="${user.json_metadata.profile.website}" target="_blank">${user.json_metadata.profile.website}</a></p>
+                    ` : ''}
+                ` : ''}
+                
+                <div class="d-flex justify-content-center gap-3 mb-3">
+                    <div class="text-center">
+                        <div class="fw-bold">${followersCount}</div>
+                        <small>Followers</small>
+                    </div>
+                    <div class="text-center">
+                        <div class="fw-bold">${followingCount}</div>
+                        <small>Following</small>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-8">
+                <h5>Recent Posts</h5>
+                ${posts.length > 0 ? `
+                    <div class="list-group">
+                        ${posts.map(post => `
+                            <a href="https://blurt.blog/${post.url}" class="list-group-item list-group-item-action" target="_blank">
+                                <div class="d-flex w-100 justify-content-between">
+                                    <h6 class="mb-1">${post.title}</h6>
+                                    <small>${new Date(post.created).toLocaleDateString()}</small>
+                                </div>
+                                <small class="text-muted">
+                                    <i class="fas fa-heart"></i> ${post.active_votes.length} | 
+                                    <i class="fas fa-comment"></i> ${post.children} | 
+                                    ${parseFloat(post.pending_payout_value.split(' ')[0]).toFixed(2)} BLURT
+                                </small>
+                            </a>
+                        `).join('')}
+                    </div>
+                ` : '<p>No recent posts found.</p>'}
+                
+                ${user.json_metadata.profile && user.json_metadata.profile.location ? `
+                    <div class="mt-3">
+                        <h5>Location</h5>
+                        <p>${user.json_metadata.profile.location}</p>
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+    
+    document.getElementById('userProfileContent').innerHTML = profileHtml;
+    document.getElementById('userProfileLoading').style.display = 'none';
+    document.getElementById('userProfileContent').style.display = 'block';
+}
